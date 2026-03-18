@@ -3,10 +3,88 @@ import axios from "axios";
 
 const API = "http://127.0.0.1:8000";
 
+function CompareTab() {
+  const [driver1, setDriver1] = useState("");
+  const [driver2, setDriver2] = useState("");
+  const [drivers, setDrivers] = useState([]);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    axios.get(`${API}/drivers`).then(r => setDrivers(r.data.drivers));
+  }, []);
+
+  const handleCompare = async () => {
+    if (!driver1 || !driver2) return;
+    setLoading(true);
+    setResult(null);
+    const r = await axios.get(`${API}/compare/${encodeURIComponent(driver1)}/${encodeURIComponent(driver2)}`);
+    setResult(r.data);
+    setLoading(false);
+  };
+
+  const StatBox = ({ label, v1, v2 }) => {
+    const better1 = parseFloat(v1) < parseFloat(v2);
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 1fr", gap: 8, alignItems: "center", marginBottom: 8 }}>
+        <div style={{ background: better1 ? "#1a3a1a" : "#1a1a1a", padding: "10px 16px", borderRadius: 8, textAlign: "center", color: better1 ? "#4caf50" : "#fff", fontWeight: 700 }}>{v1 ?? "N/A"}</div>
+        <div style={{ textAlign: "center", color: "#888", fontSize: 12 }}>{label}</div>
+        <div style={{ background: !better1 ? "#1a3a1a" : "#1a1a1a", padding: "10px 16px", borderRadius: 8, textAlign: "center", color: !better1 ? "#4caf50" : "#fff", fontWeight: 700 }}>{v2 ?? "N/A"}</div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ padding: 32, overflowY: "auto" }}>
+      <h2 style={{ margin: "0 0 24px" }}>⚔️ Head to Head Comparison</h2>
+      <div style={{ display: "flex", gap: 16, marginBottom: 24, alignItems: "center" }}>
+        <select value={driver1} onChange={e => setDriver1(e.target.value)} style={{
+          flex: 1, padding: "12px 16px", borderRadius: 8, border: "1px solid #333",
+          background: "#1a1a1a", color: "#fff", fontSize: 14
+        }}>
+          <option value="">Select Driver 1</option>
+          {drivers.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <span style={{ color: "#e10600", fontWeight: 800, fontSize: 20 }}>VS</span>
+        <select value={driver2} onChange={e => setDriver2(e.target.value)} style={{
+          flex: 1, padding: "12px 16px", borderRadius: 8, border: "1px solid #333",
+          background: "#1a1a1a", color: "#fff", fontSize: 14
+        }}>
+          <option value="">Select Driver 2</option>
+          {drivers.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <button onClick={handleCompare} disabled={loading || !driver1 || !driver2} style={{
+          padding: "12px 24px", background: "#e10600", color: "#fff",
+          border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer"
+        }}>{loading ? "Analysing..." : "Compare"}</button>
+      </div>
+
+      {result && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 1fr", gap: 8, marginBottom: 16 }}>
+            <div style={{ textAlign: "center", fontWeight: 800, fontSize: 18, color: "#e10600" }}>{result.driver1.driver.split(" ").pop()}</div>
+            <div></div>
+            <div style={{ textAlign: "center", fontWeight: 800, fontSize: 18, color: "#e10600" }}>{result.driver2.driver.split(" ").pop()}</div>
+          </div>
+          <StatBox label="Total Wins" v1={result.driver1.wins} v2={result.driver2.wins} />
+          <StatBox label="Win Rate %" v1={result.driver1.win_rate} v2={result.driver2.win_rate} />
+          <StatBox label="Avg Finish" v1={result.driver1.avg_finish} v2={result.driver2.avg_finish} />
+          <StatBox label="Wet Avg Finish" v1={result.driver1.wet_avg_finish} v2={result.driver2.wet_avg_finish} />
+          <StatBox label="Street Wins" v1={result.driver1.street_wins} v2={result.driver2.street_wins} />
+          <div style={{ marginTop: 24, background: "#1a1a1a", borderRadius: 12, padding: 20 }}>
+            <p style={{ color: "#888", fontSize: 12, textTransform: "uppercase", letterSpacing: 1, margin: "0 0 12px" }}>AI Analysis</p>
+            <p style={{ lineHeight: 1.7, margin: 0 }}>{result.ai_analysis}</p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([
-    { role: "ai", text: "Welcome to PitWall AI 🏎️ Ask me anything about F1 drivers from 2000 to 2023!" }
+    { role: "ai", text: "Welcome to PitWall AI 🏎️ Ask me anything about F1 drivers from 2000 to 2025!" }
   ]);
   const [loading, setLoading] = useState(false);
   const [drivers, setDrivers] = useState([]);
@@ -49,10 +127,10 @@ export default function App() {
         <span style={{ fontSize: 28 }}>🏎️</span>
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: 1 }}>PITWALL AI</h1>
-          <p style={{ margin: 0, fontSize: 12, opacity: 0.8 }}>F1 Driver Performance Intelligence · 2000–2023</p>
+          <p style={{ margin: 0, fontSize: 12, opacity: 0.8 }}>F1 Driver Performance Intelligence · 2000–2025</p>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {["chat", "stats", "leaderboard"].map(tab => (
+          {["chat", "stats", "leaderboard", "compare"].map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{
               padding: "8px 16px", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600,
               background: activeTab === tab ? "#fff" : "rgba(255,255,255,0.2)",
@@ -164,7 +242,7 @@ export default function App() {
           {/* LEADERBOARD TAB */}
           {activeTab === "leaderboard" && (
             <div style={{ padding: 32, overflowY: "auto" }}>
-              <h2 style={{ margin: "0 0 24px" }}>🏆 All-Time Win Leaders (2000–2023)</h2>
+              <h2 style={{ margin: "0 0 24px" }}>🏆 All-Time Win Leaders (2000–2025)</h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {leaderboard.map((d, i) => (
                   <div key={d.driver} onClick={() => handleDriverSelect(d.driver)} style={{
@@ -183,6 +261,9 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* COMPARE TAB */}
+          {activeTab === "compare" && <CompareTab />}
 
           {/* STATS TAB - no driver selected */}
           {activeTab === "stats" && !driverStats && (

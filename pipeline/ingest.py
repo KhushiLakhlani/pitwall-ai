@@ -4,31 +4,28 @@ import os
 import time
 
 def fetch_with_retry(url, max_retries=5):
-    """Fetch a URL with retries and increasing wait times"""
     for attempt in range(max_retries):
         try:
             response = requests.get(url, timeout=15)
             if response.status_code == 200 and response.text.strip():
                 return response.json()
             else:
-                print(f"  Empty response, waiting {2 ** attempt}s before retry...")
-                time.sleep(2 ** attempt)  # 1s, 2s, 4s, 8s, 16s
+                print(f"  Empty response, waiting {2 ** attempt}s...")
+                time.sleep(2 ** attempt)
         except Exception as e:
-            print(f"  Error: {e}, waiting {2 ** attempt}s before retry...")
+            print(f"  Error: {e}, waiting {2 ** attempt}s...")
             time.sleep(2 ** attempt)
     return None
 
 def get_race_results(year):
-    """Pull ALL race results for a given year, handling pagination + retries"""
     results = []
     offset = 0
     limit = 100
 
     while True:
         url = f"https://api.jolpi.ca/ergast/f1/{year}/results/?limit={limit}&offset={offset}&format=json"
-        
         data = fetch_with_retry(url)
-        
+
         if data is None:
             print(f"  Failed to fetch {year} offset {offset}, skipping...")
             break
@@ -57,30 +54,28 @@ def get_race_results(year):
         if offset >= total:
             break
 
-        time.sleep(1.5)  # pause between pages
+        time.sleep(1.5)
 
     return pd.DataFrame(results)
 
+# --- Main ---
+print("Starting race results pull...")
+all_data = []
+years = range(2000, 2026)
 
-if __name__ == "__main__":
-    all_data = []
-    years = range(2000, 2024)
+for year in years:
+    print(f"Fetching {year}...")
+    df = get_race_results(year)
+    print(f"  → {len(df)} rows")
+    all_data.append(df)
+    time.sleep(2)
 
-    for year in years:
-        print(f"Fetching {year}...")
-        df = get_race_results(year)
-        print(f"  → {len(df)} rows")
-        all_data.append(df)
-        time.sleep(2)  # longer pause between years
+full_df = pd.concat(all_data, ignore_index=True)
+print(f"\nTotal rows: {len(full_df)}")
+print(f"Years covered: {full_df['year'].min()} → {full_df['year'].max()}")
+print(f"Unique drivers: {full_df['driver_full'].nunique()}")
+print(f"Unique circuits: {full_df['circuit'].nunique()}")
 
-    # Combine all years
-    full_df = pd.concat(all_data, ignore_index=True)
-    print(f"\nTotal rows: {len(full_df)}")
-    print(f"Years covered: {full_df['year'].min()} → {full_df['year'].max()}")
-    print(f"Unique drivers: {full_df['driver_full'].nunique()}")
-    print(f"Unique circuits: {full_df['circuit'].nunique()}")
-
-    # Save it
-    os.makedirs("data/raw", exist_ok=True)
-    full_df.to_csv("data/raw/results_all.csv", index=False)
-    print("\nSaved to data/raw/results_all.csv ✅")
+os.makedirs("data/raw", exist_ok=True)
+full_df.to_csv("data/raw/results_all.csv", index=False)
+print("\nSaved to data/raw/results_all.csv")

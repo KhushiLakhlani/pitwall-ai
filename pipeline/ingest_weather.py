@@ -59,7 +59,7 @@ WET_RACES = {
 
 print("Building race calendar with weather tags...")
 all_races = []
-years = range(2000, 2024)
+years = range(2000, 2026)
 
 for year in years:
     print(f"Fetching calendar {year}...")

@@ -3,13 +3,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import chromadb
 from sentence_transformers import SentenceTransformer
-import ollama
+from groq import Groq
 import pandas as pd
+import os
+from dotenv import load_dotenv
+import sys
+sys.path.append('.')
+
+load_dotenv()
 
 # --- Setup ---
 app = FastAPI(title="PitWall AI", description="F1 Driver Performance RAG Chatbot")
 
-# Allow React frontend to talk to this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,6 +23,9 @@ app.add_middleware(
 )
 
 # --- Load models and data ---
+print("Configuring Groq...")
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
 print("Loading embedding model...")
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
@@ -41,19 +49,16 @@ def root():
 
 @app.post("/chat")
 def chat(request: QuestionRequest):
-    """Ask any F1 question"""
     question = request.question
-    
+
     # Retrieve relevant chunks
-    query_embedding = model.encode(question).tolist()
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=5
-    )
-    chunks = results['documents'][0]
+    # Smart retrieval with metadata filtering
+    import sys
+    sys.path.append('.')
+    from rag.retriever import smart_retrieve
+    chunks = smart_retrieve(question, n_results=8)
     context = "\n\n".join(chunks)
-    
-    # Generate answer
+
     prompt = f"""You are PitWall AI, an expert F1 analyst with access to race data from 2000 to 2023.
 
 Use ONLY the following data to answer the question. Be specific, cite numbers, and give insights like a real analyst would.
@@ -66,39 +71,36 @@ QUESTION: {question}
 
 ANSWER:"""
 
-    response = ollama.chat(
-        model='llama3.2',
-        messages=[{'role': 'user', 'content': prompt}]
+    response = groq_client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}]
     )
-    
-    answer = response['message']['content']
-    
+    answer = response.choices[0].message.content
+
     return {
         "question": question,
         "answer": answer,
-        "sources": chunks[:3]  # Return top 3 sources
+        "sources": chunks[:3]
     }
 
 @app.get("/drivers")
 def get_drivers():
-    """Get list of all drivers"""
     drivers = sorted(df['driver_full'].unique().tolist())
     return {"drivers": drivers}
 
 @app.get("/stats/{driver_name}")
 def get_driver_stats(driver_name: str):
-    """Get stats for a specific driver"""
     driver_data = df[df['driver_full'] == driver_name]
-    
+
     if len(driver_data) == 0:
         return {"error": "Driver not found"}
-    
+
     total_races = len(driver_data)
     wins = len(driver_data[driver_data['position'] == 1])
     podiums = len(driver_data[driver_data['position'] <= 3])
     wet_races = driver_data[driver_data['weather'] == 'wet']
     street_races = driver_data[driver_data['circuit_type'] == 'street']
-    
+
     return {
         "driver": driver_name,
         "total_races": total_races,
@@ -116,7 +118,6 @@ def get_driver_stats(driver_name: str):
 
 @app.get("/leaderboard")
 def get_leaderboard():
-    """Get top drivers by wins"""
     top_drivers = []
     for driver, group in df.groupby('driver_full'):
         wins = len(group[group['position'] == 1])
@@ -127,6 +128,64 @@ def get_leaderboard():
                 "races": len(group),
                 "win_rate": round(wins / len(group) * 100, 1)
             })
-    
+
     top_drivers = sorted(top_drivers, key=lambda x: x['wins'], reverse=True)[:10]
     return {"leaderboard": top_drivers}
+
+@app.get("/compare/{driver1}/{driver2}")
+def compare_drivers(driver1: str, driver2: str):
+    """Compare two drivers head to head"""
+    def get_stats(driver_name):
+        data = df[df['driver_full'] == driver_name]
+        if len(data) == 0:
+            return None
+        wet = data[data['weather'] == 'wet']
+        street = data[data['circuit_type'] == 'street']
+        total = len(data)
+        wins = len(data[data['position'] == 1])
+        return {
+            "driver": driver_name,
+            "total_races": total,
+            "wins": wins,
+            "win_rate": round(wins / total * 100, 1),
+            "avg_finish": round(data['position'].mean(), 2),
+            "wet_avg_finish": round(wet['position'].mean(), 2) if len(wet) > 0 else None,
+            "wet_wins": len(wet[wet['position'] == 1]),
+            "street_avg_finish": round(street['position'].mean(), 2) if len(street) > 0 else None,
+            "street_wins": len(street[street['position'] == 1]),
+            "years_active": f"{int(data['year'].min())} - {int(data['year'].max())}",
+        }
+
+    stats1 = get_stats(driver1)
+    stats2 = get_stats(driver2)
+
+    if not stats1 or not stats2:
+        return {"error": "One or both drivers not found"}
+
+    # Generate AI comparison
+    from rag.retriever import smart_retrieve
+    chunks1 = smart_retrieve(f"{driver1} career performance")
+    chunks2 = smart_retrieve(f"{driver2} career performance")
+    context = "\n\n".join(chunks1[:3] + chunks2[:3])
+
+    prompt = f"""You are PitWall AI, an expert F1 analyst.
+Compare these two drivers based on the data provided. Be specific, cite numbers, and give a clear verdict.
+
+DATA:
+{context}
+
+Compare {driver1} vs {driver2} across: overall performance, wet conditions, street circuits.
+Give a final verdict on who is the stronger all-round driver based on the data.
+
+ANALYSIS:"""
+
+    response = groq_client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    return {
+        "driver1": stats1,
+        "driver2": stats2,
+        "ai_analysis": response.choices[0].message.content
+    }

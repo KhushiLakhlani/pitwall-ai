@@ -61,7 +61,7 @@ def get_qualifying_results(year):
 # --- Main ---
 print("Starting qualifying data pull...")
 all_data = []
-years = range(2000, 2024)
+years = range(2000, 2026)
 
 for year in years:
     print(f"Fetching qualifying {year}...")

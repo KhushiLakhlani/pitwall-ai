@@ -6,10 +6,10 @@ from sentence_transformers import SentenceTransformer
 from groq import Groq
 import pandas as pd
 import os
-from dotenv import load_dotenv
 import sys
-sys.path.append('.')
+from dotenv import load_dotenv
 
+sys.path.append('.')
 load_dotenv()
 
 # --- Setup ---
@@ -22,21 +22,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Load models and data ---
-print("Configuring Groq...")
+# --- Groq client (lightweight, load immediately) ---
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-print("Loading embedding model...")
-model = SentenceTransformer('all-MiniLM-L6-v2')
+# --- Lazy loaded resources ---
+_model = None
+_collection = None
+_df = None
 
-print("Connecting to ChromaDB...")
-client = chromadb.PersistentClient(path="./chromadb")
-collection = client.get_collection("f1_pitwall")
+def get_model():
+    global _model
+    if _model is None:
+        print("Loading embedding model...")
+        _model = SentenceTransformer('all-MiniLM-L6-v2')
+        print("Embedding model loaded ✅")
+    return _model
 
-print("Loading master dataset...")
-df = pd.read_csv("data/processed/master.csv")
+def get_collection():
+    global _collection
+    if _collection is None:
+        print("Connecting to ChromaDB Cloud...")
+        client = chromadb.CloudClient(
+            api_key=os.getenv("CHROMA_API_KEY"),
+            tenant=os.getenv("CHROMA_TENANT"),
+            database=os.getenv("CHROMA_DATABASE")
+        )
+        _collection = client.get_collection("f1_pitwall")
+        print("ChromaDB Cloud connected ✅")
+    return _collection
 
-print("API ready")
+def get_df():
+    global _df
+    if _df is None:
+        print("Loading master dataset...")
+        _df = pd.read_csv("data/processed/master.csv")
+        print("Dataset loaded ✅")
+    return _df
+
+print("API ready ✅")
 
 # --- Request model ---
 class QuestionRequest(BaseModel):
@@ -45,21 +68,17 @@ class QuestionRequest(BaseModel):
 # --- Routes ---
 @app.get("/")
 def root():
-    return {"message": "PitWall AI is running"}
+    return {"message": "PitWall AI is running 🏎️"}
 
 @app.post("/chat")
 def chat(request: QuestionRequest):
     question = request.question
 
-    # Retrieve relevant chunks
-    # Smart retrieval with metadata filtering
-    import sys
-    sys.path.append('.')
     from rag.retriever import smart_retrieve
     chunks = smart_retrieve(question, n_results=8)
     context = "\n\n".join(chunks)
 
-    prompt = f"""You are PitWall AI, an expert F1 analyst with access to race data from 2000 to 2023.
+    prompt = f"""You are PitWall AI, an expert F1 analyst with access to race data from 2000 to 2025.
 
 Use ONLY the following data to answer the question. Be specific, cite numbers, and give insights like a real analyst would.
 If the data doesn't contain enough information, say so clearly.
@@ -85,11 +104,13 @@ ANSWER:"""
 
 @app.get("/drivers")
 def get_drivers():
+    df = get_df()
     drivers = sorted(df['driver_full'].unique().tolist())
     return {"drivers": drivers}
 
 @app.get("/stats/{driver_name}")
 def get_driver_stats(driver_name: str):
+    df = get_df()
     driver_data = df[df['driver_full'] == driver_name]
 
     if len(driver_data) == 0:
@@ -118,6 +139,7 @@ def get_driver_stats(driver_name: str):
 
 @app.get("/leaderboard")
 def get_leaderboard():
+    df = get_df()
     top_drivers = []
     for driver, group in df.groupby('driver_full'):
         wins = len(group[group['position'] == 1])
@@ -134,7 +156,8 @@ def get_leaderboard():
 
 @app.get("/compare/{driver1}/{driver2}")
 def compare_drivers(driver1: str, driver2: str):
-    """Compare two drivers head to head"""
+    df = get_df()
+
     def get_stats(driver_name):
         data = df[df['driver_full'] == driver_name]
         if len(data) == 0:
@@ -162,7 +185,6 @@ def compare_drivers(driver1: str, driver2: str):
     if not stats1 or not stats2:
         return {"error": "One or both drivers not found"}
 
-    # Generate AI comparison
     from rag.retriever import smart_retrieve
     chunks1 = smart_retrieve(f"{driver1} career performance")
     chunks2 = smart_retrieve(f"{driver2} career performance")

@@ -5,13 +5,25 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-model = SentenceTransformer('all-MiniLM-L6-v2')
-client = chromadb.CloudClient(
-    api_key=os.getenv("CHROMA_API_KEY"),
-    tenant=os.getenv("CHROMA_TENANT"),
-    database=os.getenv("CHROMA_DATABASE")
-)
-collection = client.get_collection("f1_pitwall")
+_model = None
+_collection = None
+
+def get_model():
+    global _model
+    if _model is None:
+        _model = SentenceTransformer('all-MiniLM-L6-v2')
+    return _model
+
+def get_collection():
+    global _collection
+    if _collection is None:
+        client = chromadb.CloudClient(
+            api_key=os.getenv("CHROMA_API_KEY"),
+            tenant=os.getenv("CHROMA_TENANT"),
+            database=os.getenv("CHROMA_DATABASE")
+        )
+        _collection = client.get_collection("f1_pitwall")
+    return _collection
 
 def parse_query(question):
     """Extract filters from the question"""
@@ -45,6 +57,9 @@ def parse_query(question):
 
 def smart_retrieve(question, n_results=8):
     """Smart retrieval with metadata filtering"""
+    model = get_model()
+    collection = get_collection()
+
     filters, detected_drivers = parse_query(question)
     query_embedding = model.encode(question).tolist()
 
